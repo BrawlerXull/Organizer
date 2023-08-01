@@ -6,9 +6,13 @@ import (
 	"os/user"
 	"path/filepath"
 	"strings"
+
+	"github.com/logrusorgru/aurora/v4"
 )
 
 func main() {
+	fmt.Println(aurora.Magenta("Welcome to Aurora"))
+
 	currentUser, err := user.Current()
 	if err != nil {
 		panic(err)
@@ -20,13 +24,13 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	fmt.Println(aurora.Cyan("Below files are found"))
 
 	for _, file := range files {
-		fmt.Println(file.Name())
-
+		fmt.Println(aurora.Yellow(file.Name()))
 		extensionName := filepath.Ext(file.Name())
 		extensionName = strings.TrimPrefix(extensionName, ".")
-		fmt.Println(extensionName)
+		// fmt.Println(extensionName)
 
 		if file.Name() == ".DS_Store" || extensionName == "" {
 			continue
