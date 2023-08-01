@@ -28,8 +28,6 @@ func main() {
 		extensionName = strings.TrimPrefix(extensionName, ".")
 		fmt.Println(extensionName)
 
-		// Create the destination directory (inside "wdfvs")
-
 		if file.Name() == ".DS_Store" || extensionName == "" {
 			continue
 		}
@@ -42,8 +40,6 @@ func main() {
 
 		sourceFilePath := filepath.Join(filePathDir, file.Name())
 		destinationFilePath := filepath.Join(destinationDir, file.Name())
-
-		// Move the file to the new destination path
 		err = os.Rename(sourceFilePath, destinationFilePath)
 		if err != nil {
 			fmt.Println("Error moving the file:", err)
