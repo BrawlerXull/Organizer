@@ -1,9 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
-	"os/user"
 	"path/filepath"
 	"strings"
 
@@ -11,14 +11,21 @@ import (
 )
 
 func main() {
-	fmt.Println(aurora.Magenta("Welcome to Aurora"))
+	fmt.Println(aurora.Magenta("Welcome to Ogranizer"))
+	fmt.Println(aurora.Cyan("Enter the directory to clean"))
 
-	currentUser, err := user.Current()
-	if err != nil {
-		panic(err)
-	}
+	// currentUser, err := user.Current()
+	// if err != nil {
+	// 	panic(err)
+	// }
 
-	filePathDir := filepath.Join(currentUser.HomeDir, "Desktop/wdfvs")
+	in := bufio.NewReader(os.Stdin)
+
+	filePathDir, err := in.ReadString('\n')
+	filePathDir = strings.TrimSuffix(filePathDir, "\n")
+	filePathDir = strings.TrimSuffix(filePathDir, "\r")
+
+	// filePathDir := filepath.Join(currentUser.HomeDir, "Desktop/kk")
 
 	files, err := os.ReadDir(filePathDir)
 	if err != nil {
@@ -50,4 +57,9 @@ func main() {
 			return
 		}
 	}
+
+	fmt.Println(aurora.Magenta("Press Enter key to close"))
+	Close, err := in.ReadString('\n')
+	fmt.Println(Close)
+
 }
