@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/log"
-	"github.com/logrusorgru/aurora/v4"
 )
 
 func setupLogger() *os.File {
@@ -20,32 +20,83 @@ func setupLogger() *os.File {
 	return logFile
 }
 
+func out() *log.Logger {
+	Stdlog := log.New(os.Stderr)
+	log.ErrorLevelStyle = lipgloss.NewStyle().
+		SetString("ERROR!!").
+		Bold(true).
+		Padding(0, 1, 0, 1).
+		Background(lipgloss.AdaptiveColor{
+			Light: "203",
+			Dark:  "204",
+		}).
+		Foreground(lipgloss.Color("#211f26"))
+	return Stdlog
+}
+
 func closeLogger(logFile *os.File) {
-	if err := logFile.Close(); err != nil {
+	err := logFile.Close()
+	if err != nil {
 		log.Fatal("Error closing log file:", err)
 	}
 }
 
+func checkerr(err error, Stdlog *log.Logger) {
+	if err != nil {
+		Stdlog.Error(err)
+		log.Fatal(err)
+		return
+	}
+}
+
+var welcomeStyle = lipgloss.NewStyle().
+	Bold(true).
+	Foreground(lipgloss.Color("#81efc5")).
+	Padding(0, 1, 0, 1).
+	BorderBottom(true).
+	BorderTop(true).
+	BorderStyle(lipgloss.NormalBorder()).
+	BorderBottomForeground(lipgloss.Color("#3c4056")).
+	BorderTopForeground(lipgloss.Color("#3c4056"))
+
+var InputPromptStyle = lipgloss.NewStyle().
+	Foreground(lipgloss.Color("#6aaa96"))
+
+var arrStyle = lipgloss.NewStyle().
+	Bold(true).
+	Foreground(lipgloss.Color("#ba9af8"))
+
+var BorderNotif = lipgloss.NewStyle().
+	BorderStyle(lipgloss.NormalBorder()).
+	BorderBottom(true).
+	BorderTop(true).
+	BorderForeground(lipgloss.Color("#3c4056")).
+	Padding(0, 1, 0, 1)
+
+var infoStyle = lipgloss.NewStyle().
+	Foreground(lipgloss.Color("#f19da5"))
+
 func main() {
+	Stdlog := out()
 	logFile := setupLogger()
 	defer closeLogger(logFile)
-	fmt.Println(aurora.Magenta("Welcome to Ogranizer"))
-	fmt.Println(aurora.Cyan("Enter the directory to clean"))
+	fmt.Println(welcomeStyle.Render("Welcome to Organizer !!"))
+	fmt.Println(InputPromptStyle.Render("Enter the directory to clean"))
+	fmt.Print(arrStyle.Render("> "))
 
 	in := bufio.NewReader(os.Stdin)
 
 	filePathDir, err := in.ReadString('\n')
+	checkerr(err, Stdlog)
 	filePathDir = strings.TrimSuffix(filePathDir, "\n")
 	filePathDir = strings.TrimSuffix(filePathDir, "\r")
 
 	files, err := os.ReadDir(filePathDir)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(aurora.Cyan("Below files are found"))
+	checkerr(err, Stdlog)
+	fmt.Println(BorderNotif.Render("Below files are found"))
 
 	for _, file := range files {
-		fmt.Println(aurora.Yellow(file.Name()))
+		fmt.Println(infoStyle.Render(fmt.Sprintf("* %s", file.Name())))
 		extensionName := filepath.Ext(file.Name())
 		extensionName = strings.TrimPrefix(extensionName, ".")
 
@@ -54,25 +105,16 @@ func main() {
 		}
 		destinationDir := filepath.Join(filePathDir, extensionName)
 		err := os.MkdirAll(destinationDir, 0755)
-		if err != nil {
-			fmt.Println("Error creating destination directory:", err)
-			log.Fatal("Error creating destination directory:", err)
-			return
-		}
+		checkerr(err, Stdlog)
 
 		sourceFilePath := filepath.Join(filePathDir, file.Name())
 		destinationFilePath := filepath.Join(destinationDir, file.Name())
 		err = os.Rename(sourceFilePath, destinationFilePath)
-		if err != nil {
-			fmt.Println("Error moving the file:", err)
-			log.Fatal("Error moving the file:", err)
-			return
-		}
+		checkerr(err, Stdlog)
 	}
 	log.Info(filePathDir)
 
-	fmt.Println(aurora.Magenta("Press Enter key to close"))
-	Close, err := in.ReadString('\n')
-	fmt.Println(Close)
-
+	fmt.Println(InputPromptStyle.Render("Press Enter key to close"))
+	_, err = in.ReadString('\n')
+	checkerr(err, Stdlog)
 }
