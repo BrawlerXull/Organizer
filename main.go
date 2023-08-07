@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -148,6 +149,34 @@ func main() {
 
 		files, err := os.ReadDir(filePathDir)
 		checkerr(err, Stdlog)
+
+		fmt.Println(InputPromptStyle.Render("Enter the number of years old files to clean"))
+		fmt.Print(arrStyle.Render("> "))
+		inputyear, err := in.ReadString('\n')
+		checkerr(err, Stdlog)
+		inputyear = strings.TrimSuffix(inputyear, "\n")
+		inputyear = strings.TrimSuffix(inputyear, "\r")
+		year, err := strconv.Atoi(inputyear)
+		checkerr(err, Stdlog)
+
+		fmt.Println(InputPromptStyle.Render("Enter the number of months old files to clean"))
+		fmt.Print(arrStyle.Render("> "))
+		monthInput, err := in.ReadString('\n')
+		checkerr(err, Stdlog)
+		monthInput = strings.TrimSuffix(monthInput, "\n")
+		monthInput = strings.TrimSuffix(monthInput, "\r")
+		month, err := strconv.Atoi(monthInput)
+		checkerr(err, Stdlog)
+
+		fmt.Println(InputPromptStyle.Render("Enter the number of days old files to clean"))
+		fmt.Print(arrStyle.Render("> "))
+		dayInput, err := in.ReadString('\n')
+		checkerr(err, Stdlog)
+		dayInput = strings.TrimSuffix(dayInput, "\n")
+		dayInput = strings.TrimSuffix(dayInput, "\r")
+		day, err := strconv.Atoi(dayInput)
+		checkerr(err, Stdlog)
+
 		fmt.Println(BorderNotif.Render("Below files are found"))
 
 		for _, file := range files {
@@ -155,7 +184,7 @@ func main() {
 			cleanFileDir := filePathDir + "/" + file.Name()
 			fileInfo, err := os.Stat(cleanFileDir)
 			checkerr(err, Stdlog)
-			onDayAgo := time.Now().AddDate(0, 0, -1)
+			onDayAgo := time.Now().AddDate(-year, -month, -day)
 			if fileInfo.ModTime().Before(onDayAgo) {
 				err := os.RemoveAll(cleanFileDir)
 				checkerr(err, Stdlog)
