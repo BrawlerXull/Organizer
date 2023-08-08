@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,193 +9,227 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/log"
+	"github.com/charmbracelet/bubbles/filepicker"
+	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
-func setupLogger() *os.File {
-	logFile, err := os.OpenFile("logfile.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		log.Fatal("Unable to open log file:", err)
-	}
-	log.SetOutput(logFile)
-	return logFile
+type keyMap struct {
+	Sort  key.Binding
+	Clean key.Binding
+	Help  key.Binding
+	Quit  key.Binding
 }
 
-func out() *log.Logger {
-	Stdlog := log.New(os.Stderr)
-	log.ErrorLevelStyle = lipgloss.NewStyle().
-		SetString("ERROR!!").
-		Bold(true).
-		Padding(0, 1, 0, 1).
-		Background(lipgloss.AdaptiveColor{
-			Light: "203",
-			Dark:  "204",
-		}).
-		Foreground(lipgloss.Color("#211f26"))
-	return Stdlog
+func (k keyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.Sort, k.Clean, k.Help, k.Quit}
 }
 
-func closeLogger(logFile *os.File) {
-	err := logFile.Close()
-	if err != nil {
-		log.Fatal("Error closing log file:", err)
+func (k keyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{k.Sort, k.Clean},
+		{k.Help, k.Quit},
 	}
 }
 
-func checkerr(err error, Stdlog *log.Logger) {
-	if err != nil {
-		Stdlog.Error(err)
-		log.Fatal(err)
-		return
+var keys = keyMap{
+	Sort: key.NewBinding(
+		key.WithKeys("s"),
+		key.WithHelp("s", "Sort by extensions"),
+	),
+	Clean: key.NewBinding(
+		key.WithKeys("c"),
+		key.WithHelp("c", "Clean old files"),
+	),
+	Help: key.NewBinding(
+		key.WithKeys("?"),
+		key.WithHelp("?", "toggle help"),
+	),
+	Quit: key.NewBinding(
+		key.WithKeys("q", "esc", "ctrl+c"),
+		key.WithHelp("q", "quit"),
+	),
+}
+
+type model struct {
+	filepicker   filepicker.Model
+	selectedFile string
+	quitting     bool
+	err          error
+	keys         keyMap
+	help         help.Model
+	DateInput    textinput.Model
+	changeview   bool
+	currentview  string
+}
+
+type clearErrorMsg struct{}
+
+func clearErrorAfter(t time.Duration) tea.Cmd {
+	return tea.Tick(t, func(_ time.Time) tea.Msg {
+		return clearErrorMsg{}
+	})
+}
+
+func (m model) Init() tea.Cmd {
+	return m.filepicker.Init()
+}
+
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+c", "q":
+			m.quitting = true
+			return m, tea.Quit
+		case "s":
+			m.quitting = true
+			Sortbyext(m.filepicker.CurrentDirectory)
+			return m, tea.Quit
+		case "c":
+			m.changeview = true
+			m.currentview = "cleaninp"
+			m.DateInput.Focus()
+			return m, tea.HideCursor
+		case tea.KeyEnter.String():
+			if m.currentview == "cleaninp" {
+				m.quitting = true
+				Clean(m.filepicker.CurrentDirectory, m.DateInput.Value())
+				return m, tea.Quit
+			}
+		}
+
+	case clearErrorMsg:
+		m.err = nil
 	}
+
+	var cmd tea.Cmd
+	m.filepicker, cmd = m.filepicker.Update(msg)
+	if m.currentview == "cleaninp" {
+		m.DateInput, cmd = m.DateInput.Update(msg)
+	}
+	// Did the user select a file?
+	if didSelect, path := m.filepicker.DidSelectFile(msg); didSelect {
+		// Get the path of the selected file.
+		m.selectedFile = path
+		// clean(m.filepicker.CurrentDirectory)
+	}
+
+	// Did the user select a disabled file?
+	// This is only necessary to display an error to the user.
+	if didSelect, path := m.filepicker.DidSelectDisabledFile(msg); didSelect {
+		// Let's clear the selectedFile and display an error.
+		m.err = errors.New(path + " is not valid.")
+		m.selectedFile = ""
+		return m, tea.Batch(cmd, clearErrorAfter(2*time.Second))
+	}
+
+	return m, cmd
 }
 
-func customError(err string, Stdlog *log.Logger) {
-	Stdlog.Error(err)
-	log.Fatal(err)
+func (m model) View() string {
+	var s strings.Builder
+	s.WriteString("\n  ")
+	if m.quitting {
+		return ""
+	} else if m.changeview {
+		s.WriteString("\n\n" + m.DateInput.View() + "\n" + m.help.View(m.keys))
+		return s.String()
+	}
+	if m.err != nil {
+		s.WriteString(m.filepicker.Styles.DisabledFile.Render(m.err.Error()))
+	} else if m.selectedFile == "" {
+		s.WriteString("Current directory: " + m.filepicker.CurrentDirectory)
+	} else {
+		s.WriteString("Selected directory: " + m.filepicker.Styles.Selected.Render(m.filepicker.CurrentDirectory))
+	}
+	s.WriteString("\n\n" + m.filepicker.View() + "\n" + m.help.View(m.keys))
+	return s.String()
 }
-
-var welcomeStyle = lipgloss.NewStyle().
-	Bold(true).
-	Foreground(lipgloss.Color("#81efc5")).
-	Padding(0, 1, 0, 1).
-	BorderBottom(true).
-	BorderTop(true).
-	BorderStyle(lipgloss.NormalBorder()).
-	BorderBottomForeground(lipgloss.Color("#3c4056")).
-	BorderTopForeground(lipgloss.Color("#3c4056"))
-
-var InputPromptStyle = lipgloss.NewStyle().
-	Foreground(lipgloss.Color("#6aaa96"))
-
-var arrStyle = lipgloss.NewStyle().
-	Bold(true).
-	Foreground(lipgloss.Color("#ba9af8"))
-
-var BorderNotif = lipgloss.NewStyle().
-	BorderStyle(lipgloss.NormalBorder()).
-	BorderBottom(true).
-	BorderTop(true).
-	BorderForeground(lipgloss.Color("#3c4056")).
-	Padding(0, 1, 0, 1)
-
-var infoStyle = lipgloss.NewStyle().
-	Foreground(lipgloss.Color("#f19da5"))
-
-var questionStyle = lipgloss.NewStyle().
-	Bold(true).
-	Foreground(lipgloss.Color("#5477a8")).
-	Padding(0, 1, 0, 1).
-	BorderBottom(true).
-	BorderTop(true)
 
 func main() {
+	tea.LogToFile("debug.log", "debug")
+	fp := filepicker.New()
+	fp.AllowedTypes = []string{".mod", ".sum", ".go", ".txt", ".md"}
+	fp.CurrentDirectory, _ = os.UserHomeDir()
 
-	in := bufio.NewReader(os.Stdin)
+	ti := textinput.New()
+	ti.Placeholder = "01/02/2023"
+	ti.CharLimit = 10
+	ti.Width = 20
+	m := model{
+		filepicker: fp,
+		keys:       keys,
+		help:       help.New(),
+		DateInput:  ti,
+	}
+	tm, _ := tea.NewProgram(&m, tea.WithOutput(os.Stderr)).Run()
+	mm := tm.(model)
+	fmt.Println("\n Current directory: " + m.filepicker.Styles.Selected.Render(mm.filepicker.CurrentDirectory) + "\n")
+}
 
-	Stdlog := out()
-	logFile := setupLogger()
-	defer closeLogger(logFile)
-	fmt.Println(welcomeStyle.Render("Welcome to Organizer !!"))
+func Sortbyext(dir string) {
 
-	fmt.Println(questionStyle.Render("What do you want to perform ? (cleanOld / organize)"))
-	fmt.Print(arrStyle.Render("> "))
-	userResp, err := in.ReadString('\n')
-	checkerr(err, Stdlog)
-	userResp = strings.TrimSuffix(userResp, "\n")
-	userResp = strings.TrimSuffix(userResp, "\r")
+	files, err := os.ReadDir(dir)
+	checkerr(err)
+	fmt.Println("Below files are found")
 
-	if userResp == "organize" {
-		fmt.Println(InputPromptStyle.Render("Enter the directory to clean"))
-		fmt.Print(arrStyle.Render("> "))
+	for _, file := range files {
+		// fmt.Println(file.Name())
+		extensionName := filepath.Ext(file.Name())
+		extensionName = strings.TrimPrefix(extensionName, ".")
+		// fmt.Println(extensionName)
 
-		filePathDir, err := in.ReadString('\n')
-		checkerr(err, Stdlog)
-		filePathDir = strings.TrimSuffix(filePathDir, "\n")
-		filePathDir = strings.TrimSuffix(filePathDir, "\r")
-
-		files, err := os.ReadDir(filePathDir)
-		checkerr(err, Stdlog)
-		fmt.Println(BorderNotif.Render("Below files are found"))
-
-		for _, file := range files {
-			fmt.Println(infoStyle.Render(fmt.Sprintf("* %s", file.Name())))
-			extensionName := filepath.Ext(file.Name())
-			extensionName = strings.TrimPrefix(extensionName, ".")
-
-			if file.Name() == ".DS_Store" || extensionName == "" {
-				continue
-			}
-			destinationDir := filepath.Join(filePathDir, extensionName)
-			err := os.MkdirAll(destinationDir, 0755)
-			checkerr(err, Stdlog)
-
-			sourceFilePath := filepath.Join(filePathDir, file.Name())
-			destinationFilePath := filepath.Join(destinationDir, file.Name())
-			err = os.Rename(sourceFilePath, destinationFilePath)
-			checkerr(err, Stdlog)
-
-			log.Info(filePathDir)
+		if file.Name() == ".DS_Store" || extensionName == "" {
+			continue
 		}
-	} else if userResp == "cleanOld" {
-		fmt.Println(InputPromptStyle.Render("Enter the directory to clean"))
-		fmt.Print(arrStyle.Render("> "))
-
-		filePathDir, err := in.ReadString('\n')
-		checkerr(err, Stdlog)
-		filePathDir = strings.TrimSuffix(filePathDir, "\n")
-		filePathDir = strings.TrimSuffix(filePathDir, "\r")
-
-		files, err := os.ReadDir(filePathDir)
-		checkerr(err, Stdlog)
-
-		fmt.Println(InputPromptStyle.Render("Enter the number of years old files to clean"))
-		fmt.Print(arrStyle.Render("> "))
-		inputyear, err := in.ReadString('\n')
-		checkerr(err, Stdlog)
-		inputyear = strings.TrimSuffix(inputyear, "\n")
-		inputyear = strings.TrimSuffix(inputyear, "\r")
-		year, err := strconv.Atoi(inputyear)
-		checkerr(err, Stdlog)
-
-		fmt.Println(InputPromptStyle.Render("Enter the number of months old files to clean"))
-		fmt.Print(arrStyle.Render("> "))
-		monthInput, err := in.ReadString('\n')
-		checkerr(err, Stdlog)
-		monthInput = strings.TrimSuffix(monthInput, "\n")
-		monthInput = strings.TrimSuffix(monthInput, "\r")
-		month, err := strconv.Atoi(monthInput)
-		checkerr(err, Stdlog)
-
-		fmt.Println(InputPromptStyle.Render("Enter the number of days old files to clean"))
-		fmt.Print(arrStyle.Render("> "))
-		dayInput, err := in.ReadString('\n')
-		checkerr(err, Stdlog)
-		dayInput = strings.TrimSuffix(dayInput, "\n")
-		dayInput = strings.TrimSuffix(dayInput, "\r")
-		day, err := strconv.Atoi(dayInput)
-		checkerr(err, Stdlog)
-
-		fmt.Println(BorderNotif.Render("Below files are found"))
-
-		for _, file := range files {
-			fmt.Println(infoStyle.Render(fmt.Sprintf("* %s", file.Name())))
-			cleanFileDir := filePathDir + "/" + file.Name()
-			fileInfo, err := os.Stat(cleanFileDir)
-			checkerr(err, Stdlog)
-			onDayAgo := time.Now().AddDate(-year, -month, -day)
-			if fileInfo.ModTime().Before(onDayAgo) {
-				err := os.RemoveAll(cleanFileDir)
-				checkerr(err, Stdlog)
-			}
-			log.Info(filePathDir)
+		destinationDir := filepath.Join(dir, extensionName)
+		err := os.MkdirAll(destinationDir, 0755)
+		if err != nil {
+			fmt.Println("Error creating destination directory:", err)
+			return
 		}
-	} else {
-		customError(infoStyle.Render("Command not found"), Stdlog)
+
+		sourceFilePath := filepath.Join(dir, file.Name())
+		destinationFilePath := filepath.Join(destinationDir, file.Name())
+		err = os.Rename(sourceFilePath, destinationFilePath)
+		if err != nil {
+			fmt.Println("Error moving the file:", err)
+			return
+		}
 	}
 
-	fmt.Println(InputPromptStyle.Render("Press Enter key to close"))
-	_, err = in.ReadString('\n')
-	checkerr(err, Stdlog)
+}
+
+func checkerr(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
+
+func Clean(filePathDir string, d string) {
+	files, err := os.ReadDir(filePathDir)
+	checkerr(err)
+	day, err := strconv.Atoi(strings.Split(d, "/")[0])
+	checkerr(err)
+	month, err := strconv.Atoi(strings.Split(d, "/")[1])
+	checkerr(err)
+	year, err := strconv.Atoi(strings.Split(d, "/")[2])
+	checkerr(err)
+	for _, file := range files {
+		cleanFileDir := filePathDir + "/" + file.Name()
+		fileInfo, err := os.Stat(cleanFileDir)
+		if err != nil {
+			panic(err)
+		}
+		onDayAgo := time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC)
+		if fileInfo.ModTime().Before(onDayAgo) {
+			err := os.RemoveAll(cleanFileDir)
+			if err != nil {
+				panic(err)
+			}
+		}
+	}
 }
